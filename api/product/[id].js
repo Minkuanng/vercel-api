@@ -1,0 +1,25 @@
+const { db, withCors } = require('../../lib/firebase');
+
+module.exports = withCors(async (req, res) => {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
+  }
+
+  const { id } = req.query;
+
+  if (!id) {
+    return res.status(400).json({ success: false, error: 'Product ID is required' });
+  }
+
+  const snapshot = await db.ref('products/' + id).once('value');
+  const product = snapshot.val();
+
+  if (!product) {
+    return res.status(404).json({ success: false, error: 'Product not found' });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: { id, ...product },
+  });
+});
