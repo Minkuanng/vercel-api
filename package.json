@@ -1,17 +1,12 @@
 {
   "name": "vercel-api",
   "version": "1.0.0",
-  "description": "API for KuanZGame.Store - Product management and order system",
+  "description": "API for KuanZGame.Store",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "firebase-admin": "^11.11.0",
-    "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
+    "firebase-admin": "^11.11.1"
   }
 }
