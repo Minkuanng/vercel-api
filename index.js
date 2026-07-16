@@ -1,4 +1,4 @@
-// index.js - Root directory
+// index.js
 module.exports = (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -10,8 +10,7 @@ module.exports = (req, res) => {
       'GET /api/hello': 'Test endpoint',
       'GET /api/products': 'Get all products',
       'POST /api/products': 'Create new product',
-      'GET /api/product/:id': 'Get single product',
-      'POST /api/products/batch': 'Batch import products'
+      'GET /api/product/:id': 'Get single product'
     }
   });
 };
