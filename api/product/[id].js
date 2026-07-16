@@ -29,20 +29,30 @@ module.exports = async (req, res) => {
   }
 
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed', allowed: ['GET'] });
+    return res.status(405).json({ 
+      success: false,
+      error: 'Method Not Allowed', 
+      allowed: ['GET'] 
+    });
   }
 
   try {
     const { id } = req.query;
 
     if (!id) {
-      return res.status(400).json({ error: 'Product ID is required' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Product ID is required' 
+      });
     }
 
     const productDoc = await db.collection('products').doc(id).get();
 
     if (!productDoc.exists) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Product not found' 
+      });
     }
 
     return res.status(200).json({
@@ -53,6 +63,7 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('Error fetching product:', error);
     return res.status(500).json({
+      success: false,
       error: 'Internal Server Error',
       message: error.message
     });
