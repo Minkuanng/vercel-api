@@ -1,3 +1,4 @@
+// ===== FILE: api/order.js =====
 const admin = require('firebase-admin');
 
 // Khởi tạo Firebase
@@ -12,16 +13,21 @@ if (!admin.apps.length) {
 const db = admin.database();
 
 module.exports = async (req, res) => {
-    // ===== CORS =====
+    // =============================================
+    // 🚨 QUAN TRỌNG: CORS CONFIG PHẢI Ở ĐÂY
+    // =============================================
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     
+    // Xử lý preflight request
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
+    // =============================================
 
+    // Chỉ cho phép POST
     if (req.method !== 'POST') {
         return res.status(405).json({
             success: false,
@@ -41,7 +47,7 @@ module.exports = async (req, res) => {
             });
         }
 
-        // ===== ĐỌC SẢN PHẨM =====
+        // Đọc sản phẩm
         const productSnapshot = await db.ref('products/' + productId).once('value');
         const product = productSnapshot.val();
 
@@ -53,12 +59,9 @@ module.exports = async (req, res) => {
             });
         }
 
-        // ===== KIỂM TRA TỒN KHO (QUAN TRỌNG) =====
+        // Kiểm tra tồn kho
         const rawData = product.data || '';
         const dataArray = rawData.split('\n').filter(item => item.trim() !== '');
-
-        console.log(`📦 Sản phẩm: ${product.name}`);
-        console.log(`📊 Tồn kho: ${dataArray.length} món`);
 
         if (dataArray.length === 0) {
             return res.status(400).json({
@@ -68,11 +71,11 @@ module.exports = async (req, res) => {
             });
         }
 
-        // ===== LẤY MÓN ĐẦU TIÊN =====
+        // Lấy món đầu tiên
         const purchasedItem = dataArray[0];
         const remainingData = dataArray.slice(1).join('\n');
 
-        // ===== KIỂM TRA SỐ DƯ USER =====
+        // Kiểm tra số dư user
         const userBalance = await db.ref('users/' + userId + '/balance').once('value');
         const currentBalance = userBalance.val() || 0;
 
@@ -84,17 +87,15 @@ module.exports = async (req, res) => {
             });
         }
 
-        // ===== CẬP NHẬT DATABASE =====
-        // 1. Cập nhật tồn kho sản phẩm
+        // Cập nhật database
         await db.ref('products/' + productId).update({
             data: remainingData,
             sold: (product.sold || 0) + 1
         });
 
-        // 2. Trừ tiền user
         await db.ref('users/' + userId + '/balance').set(currentBalance - product.price);
 
-        // 3. Tạo đơn hàng
+        // Tạo đơn hàng
         const orderData = {
             productId,
             productName: product.name || 'Sản phẩm',
@@ -111,14 +112,13 @@ module.exports = async (req, res) => {
 
         const orderRef = await db.ref('orders').push(orderData);
 
-        // 4. Tạo thông báo
+        // Thông báo
         await db.ref('notifications').push({
             message: `✅ ${userId} đã mua ${product.name}`,
             timestamp: Date.now(),
             readBy: {}
         });
 
-        // ===== TRẢ KẾT QUẢ =====
         return res.status(200).json({
             success: true,
             message: 'Mua hàng thành công!',
