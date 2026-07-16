@@ -2,7 +2,7 @@
 const admin = require('firebase-admin');
 const { getFirestore } = require('firebase-admin/firestore');
 
-// --- Khởi tạo Firebase ---
+// Khởi tạo Firebase Admin
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
@@ -18,11 +18,11 @@ if (!admin.apps.length) {
     console.error('Firebase initialization error:', error);
   }
 }
+
 const db = getFirestore();
 
-// --- Handler chính ---
 module.exports = async (req, res) => {
-  // --- Tự xử lý CORS (Không cần import từ lib) ---
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -31,17 +31,116 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  // ============ GET ============
+  // ============ GET - Lấy danh sách sản phẩm ============
   if (req.method === 'GET') {
-    // ... (giữ nguyên code GET của bạn)
+    try {
+      const { category, limit = 50 } = req.query;
+
+      let query = db.collection('products');
+
+      if (category) {
+        query = query.where('category', '==', category);
+      }
+
+      const snapshot = await query
+        .orderBy('createdAt', 'desc')
+        .limit(Number(limit))
+        .get();
+
+      const products = [];
+      snapshot.forEach(doc => {
+        products.push({ id: doc.id, ...doc.data() });
+      });
+
+      return res.status(200).json({
+        success: true,
+        count: products.length,
+        data: products
+      });
+
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: error.message
+      });
+    }
   }
 
-  // ============ POST ============
+  // ============ POST - Tạo sản phẩm mới ============
   if (req.method === 'POST') {
-    // ... (giữ nguyên code POST của bạn, nhớ kiểm tra validate)
+    try {
+      const { 
+        name, 
+        price, 
+        category, 
+        data, 
+        icon = '📦', 
+        image = '', 
+        description = '' 
+      } = req.body;
+
+      // Validate required fields
+      if (!name || typeof name !== 'string' || name.trim() === '') {
+        return res.status(400).json({ 
+          error: 'name is required and must be a non-empty string' 
+        });
+      }
+
+      if (!price || typeof price !== 'number' || price < 0) {
+        return res.status(400).json({ 
+          error: 'price is required and must be a positive number' 
+        });
+      }
+
+      if (!category || typeof category !== 'string' || category.trim() === '') {
+        return res.status(400).json({ 
+          error: 'category is required and must be a non-empty string' 
+        });
+      }
+
+      if (!data || (typeof data !== 'string' || data.trim() === '')) {
+        return res.status(400).json({ 
+          error: 'data is required and must be a non-empty string' 
+        });
+      }
+
+      // Tạo document mới trong Firestore
+      const productRef = db.collection('products').doc();
+      const productData = {
+        id: productRef.id,
+        name: name.trim(),
+        price: Number(price),
+        category: category.trim(),
+        data: data.trim(),
+        icon: icon.trim() || '📦',
+        image: image.trim() || '',
+        description: description.trim() || '',
+        sold: 0,
+        stock: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      await productRef.set(productData);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Product created successfully',
+        productId: productRef.id,
+        data: productData
+      });
+
+    } catch (error) {
+      console.error('Error creating product:', error);
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: error.message
+      });
+    }
   }
 
-  // ============ Method Not Allowed ============
+  // Nếu method không được hỗ trợ
   return res.status(405).json({ 
     error: 'Method Not Allowed', 
     allowed: ['GET', 'POST'] 
