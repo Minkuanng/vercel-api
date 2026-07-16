@@ -1,96 +1,86 @@
 // api/products.js
-import admin from 'firebase-admin';
-import { allowCors } from '../lib/cors.js';
+const admin = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore');
 
-// Khởi tạo Firebase Admin
+// Khởi tạo Firebase Admin nếu chưa có
 if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      }),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-    });
-  } catch (error) {
-    console.error('Firebase init error:', error);
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    }),
+    databaseURL: process.env.FIREBASE_DATABASE_URL,
+  });
 }
-const db = admin.database();
 
-const handler = async (req, res) => {
-  // CORS handled by allowCors
-  
-  if (req.method === 'GET') {
-    try {
-      const snapshot = await db.ref('products').once('value');
-      const products = snapshot.val() || {};
-      
-      // Chuyển đổi dữ liệu
-      const productList = Object.keys(products).map(key => ({
-        product_id: key,
-        ...products[key],
-        stock: products[key].data ? products[key].data.split('\n').filter(d => d.trim()).length : 0
-      }));
-      
-      res.status(200).json({ 
-        success: true, 
-        total: productList.length, 
-        products: productList 
-      });
-    } catch (error) {
-      console.error('Error:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'server_error',
-        message: error.message 
-      });
+const db = getFirestore();
+
+module.exports = async (req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed', allowed: ['POST'] });
+  }
+
+  try {
+    const { name, price, category, data, icon = '📦', image = '', description = '' } = req.body;
+
+    // Validate required fields
+    if (!name || typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ error: 'name is required and must be a non-empty string' });
     }
-  } else if (req.method === 'POST') {
-    // Xử lý POST nhập sản phẩm
-    try {
-      const { name, price, category, icon, image, description, data } = req.body;
-      
-      if (!name || !price || !category || !data) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'missing_fields',
-          message: 'Thiếu: name, price, category, data'
-        });
-      }
 
-      const productData = {
-        name,
-        price: parseInt(price),
-        category,
-        icon: icon || '📦',
-        image: image || '',
-        description: description || '',
-        data: Array.isArray(data) ? data.join('\n') : data,
-        sold: 0,
-        createdAt: Date.now()
-      };
-
-      const ref = db.ref('products').push();
-      await ref.set(productData);
-      
-      res.status(200).json({ 
-        success: true, 
-        message: 'Product created successfully',
-        productId: ref.key 
-      });
-    } catch (error) {
-      console.error('POST error:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'server_error',
-        message: error.message 
-      });
+    if (!price || typeof price !== 'number' || price < 0) {
+      return res.status(400).json({ error: 'price is required and must be a positive number' });
     }
-  } else {
-    res.status(405).json({ success: false, error: 'method_not_allowed' });
+
+    if (!category || typeof category !== 'string' || category.trim() === '') {
+      return res.status(400).json({ error: 'category is required and must be a non-empty string' });
+    }
+
+    if (!data || (typeof data !== 'string' || data.trim() === '')) {
+      return res.status(400).json({ error: 'data is required and must be a non-empty string' });
+    }
+
+    // Tạo document mới trong Firestore
+    const productRef = db.collection('products').doc();
+    const productData = {
+      id: productRef.id,
+      name: name.trim(),
+      price: Number(price),
+      category: category.trim(),
+      data: data.trim(),
+      icon: icon.trim() || '📦',
+      image: image.trim() || '',
+      description: description.trim() || '',
+      sold: 0,
+      stock: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    await productRef.set(productData);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Product created successfully',
+      productId: productRef.id,
+      data: productData
+    });
+
+  } catch (error) {
+    console.error('Error creating product:', error);
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
   }
 };
-
-export default allowCors(handler);
