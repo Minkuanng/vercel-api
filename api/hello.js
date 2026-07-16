@@ -1,6 +1,5 @@
 // api/hello.js
 module.exports = (req, res) => {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,7 +10,6 @@ module.exports = (req, res) => {
 
   res.status(200).json({ 
     message: 'API is working!',
-    method: req.method,
     timestamp: Date.now()
   });
 };
