@@ -1,69 +1,56 @@
 // api/product/[id].js
-import admin from 'firebase-admin';
-import { getCorsHeaders, handleCors } from '../../lib/cors.js';
+const admin = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore');
 
-// --- Khởi tạo Firebase Admin (giống như trên) ---
 if (!admin.apps.length) {
-  try {
-    if (process.env.FIREBASE_PROJECT_ID) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-        }),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
-      });
-    }
-  } catch (error) {
-    console.error('Lỗi khởi tạo Firebase Admin:', error);
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    }),
+    databaseURL: process.env.FIREBASE_DATABASE_URL,
+  });
 }
-const db = admin.database();
 
-export default async function handler(req, res) {
+const db = getFirestore();
+
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
   if (req.method === 'OPTIONS') {
-    return handleCors(res);
+    return res.status(200).end();
   }
 
   if (req.method !== 'GET') {
-    res.setHeader('Allow', ['GET']);
-    return res.status(405).json({ success: false, error: 'method_not_allowed' });
-  }
-
-  // Lấy product_id từ URL
-  const { id } = req.query;
-
-  if (!id) {
-    return res.status(400).json({ success: false, error: 'missing_product_id' });
+    return res.status(405).json({ error: 'Method Not Allowed', allowed: ['GET'] });
   }
 
   try {
-    const snapshot = await db.ref(`products/${id}`).once('value');
-    const product = snapshot.val();
+    const { id } = req.query;
 
-    if (!product) {
-      return res.status(404).json({ success: false, error: 'product_not_found' });
+    if (!id) {
+      return res.status(400).json({ error: 'Product ID is required' });
     }
 
-    const dataArray = product.data ? product.data.split('\n').filter(d => d.trim() !== '') : [];
-    const response = {
-      success: true,
-      product_id: id,
-      name: product.name || 'Sản phẩm',
-      price: product.price || 0,
-      icon: product.icon || '📦',
-      image: product.image || '',
-      description: product.description || '',
-      category: product.category || '',
-      stock: dataArray.length,
-      sold: product.sold || 0,
-      data: dataArray, // Trả về cả dữ liệu chi tiết
-    };
+    const productDoc = await db.collection('products').doc(id).get();
 
-    res.status(200).json(response);
+    if (!productDoc.exists) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: productDoc.data()
+    });
+
   } catch (error) {
-    console.error('Lỗi khi lấy sản phẩm:', error);
-    res.status(500).json({ success: false, error: 'server_error' });
+    console.error('Error fetching product:', error);
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
   }
-}
+};
