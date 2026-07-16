@@ -2,20 +2,9 @@
 import admin from 'firebase-admin';
 import { getCorsHeaders, handleCors } from '../lib/cors.js';
 
-// --- KHỞI TẠO FIREBASE ADMIN (CHỈ MỘT LẦN) ---
-// Lưu ý: Bạn cần có file serviceAccountKey.json hoặc dùng biến môi trường.
-// Đây là cấu hình mẫu, bạn cần điều chỉnh cho đúng với project của mình.
+// --- Khởi tạo Firebase Admin (chỉ chạy 1 lần) ---
 if (!admin.apps.length) {
   try {
-    // Cách 1: Dùng file JSON (Khuyến nghị cho local)
-    // const serviceAccount = await import('../serviceAccountKey.json', { assert: { type: 'json' } });
-    // admin.initializeApp({
-    //   credential: admin.credential.cert(serviceAccount.default),
-    //   databaseURL: "https://shop-c6777-default-rtdb.asia-southeast1.firebasedatabase.app"
-    // });
-
-    // Cách 2: Dùng biến môi trường (Khuyến nghị cho Vercel)
-    // Đảm bảo bạn đã set các biến môi trường trong Vercel.
     if (process.env.FIREBASE_PROJECT_ID) {
       admin.initializeApp({
         credential: admin.credential.cert({
@@ -26,14 +15,12 @@ if (!admin.apps.length) {
         databaseURL: process.env.FIREBASE_DATABASE_URL,
       });
     } else {
-      // Fallback cho trường hợp không có biến môi trường (có thể dùng cho dev)
       console.warn("⚠️ Biến môi trường Firebase chưa được cấu hình.");
     }
   } catch (error) {
     console.error('Lỗi khởi tạo Firebase Admin:', error);
   }
 }
-
 const db = admin.database();
 
 export default async function handler(req, res) {
@@ -43,25 +30,22 @@ export default async function handler(req, res) {
     return handleCors(res);
   }
 
-  // Chỉ cho phép phương thức GET
+  // Chỉ cho phép GET
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
     return res.status(405).json({ success: false, error: 'method_not_allowed' });
   }
 
   try {
-    // Lấy tất cả sản phẩm từ Firebase
     const snapshot = await db.ref('products').once('value');
     const productsData = snapshot.val();
 
     if (!productsData) {
-      return res.status(200).json({ success: true, products: [], message: 'Kho hàng trống.' });
+      return res.status(200).json({ success: true, products: [], total: 0 });
     }
 
-    // Chuyển đổi dữ liệu từ object sang array và thêm product_id
     const products = Object.keys(productsData).map(key => {
       const product = productsData[key];
-      // Tính số lượng tồn kho dựa trên dữ liệu
       const dataArray = product.data ? product.data.split('\n').filter(d => d.trim() !== '') : [];
       return {
         product_id: key,
@@ -76,9 +60,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // Trả về danh sách sản phẩm
     res.status(200).json({ success: true, total: products.length, products });
-
   } catch (error) {
     console.error('Lỗi khi lấy sản phẩm:', error);
     res.status(500).json({ success: false, error: 'server_error' });
