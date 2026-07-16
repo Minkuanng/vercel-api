@@ -1,194 +1,97 @@
-const admin = require('../lib/firebaseAdmin');
-const { applyCors } = require('../lib/cors');
+// api/orders.js
+import admin from 'firebase-admin';
+import { getCorsHeaders, handleCors } from '../lib/cors.js';
 
+// --- Khởi tạo Firebase Admin (giống như trên) ---
+if (!admin.apps.length) {
+  try {
+    if (process.env.FIREBASE_PROJECT_ID) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }),
+        databaseURL: process.env.FIREBASE_DATABASE_URL,
+      });
+    }
+  } catch (error) {
+    console.error('Lỗi khởi tạo Firebase Admin:', error);
+  }
+}
 const db = admin.database();
 
-function randomOrderCode() {
-  return '#' + Math.random().toString(36).substring(2, 8).toUpperCase();
-}
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    return handleCors(res);
+  }
 
-module.exports = async (req, res) => {
-  if (applyCors(req, res)) return;
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', ['GET']);
+    return res.status(405).json({ success: false, error: 'method_not_allowed' });
+  }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'method_not_allowed', message: 'Chỉ hỗ trợ POST' });
+  const { shop_id, limit = 50, token } = req.query;
+
+  // Nếu có shop_id thì phải có token để xác thực
+  if (shop_id && !token) {
+    return res.status(401).json({ success: false, error: 'missing_token' });
   }
 
   try {
-    const { token, shop_id, product_id, quantity, input_data } = req.body || {};
+    let ordersRef = db.ref('orders');
+    let ordersData = {};
 
-    if (!token || !shop_id || !product_id) {
-      return res.status(400).json({
-        success: false,
-        error: 'missing_fields',
-        message: 'Thiếu token, shop_id hoặc product_id'
-      });
-    }
-
-    const qty = parseInt(quantity, 10) || 1;
-    if (qty <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'invalid_quantity',
-        message: 'quantity phải là số nguyên lớn hơn 0'
-      });
-    }
-
-    // 1) Kiểm tra đại lý
-    const shopSnap = await db.ref(`shops/${shop_id}`).once('value');
-    const shop = shopSnap.val();
-    if (!shop) {
-      return res.status(404).json({ success: false, error: 'shop_not_found', message: 'shop_id không tồn tại' });
-    }
-    if (shop.status === 'banned') {
-      return res.status(403).json({ success: false, error: 'shop_banned', message: 'Đại lý đã bị khóa' });
-    }
-    if (shop.token !== token) {
-      return res.status(401).json({ success: false, error: 'invalid_token', message: 'Token không đúng' });
-    }
-
-    // 2) Kiểm tra sản phẩm
-    const productSnap = await db.ref(`products/${product_id}`).once('value');
-    const product = productSnap.val();
-    if (!product) {
-      return res.status(404).json({ success: false, error: 'product_not_found', message: 'product_id không tồn tại' });
-    }
-
-    const price = Math.round((product.price || 0) * qty);
-
-    // 3) LẤY DỮ LIỆU TRƯỚC ĐỂ KIỂM TRA
-    // Đọc dữ liệu hiện tại để kiểm tra số lượng
-    const currentData = await db.ref(`products/${product_id}/data`).once('value');
-    const currentLines = (currentData.val() || '').split('\n').filter(l => l.trim() !== '');
-    
-    if (currentLines.length < qty) {
-      return res.status(409).json({ 
-        success: false, 
-        error: 'out_of_stock', 
-        message: `Sản phẩm không đủ số lượng trong kho (còn ${currentLines.length}, cần ${qty})` 
-      });
-    }
-
-    // Lấy ra qty dòng đầu tiên
-    const soldLines = currentLines.slice(0, qty);
-    const remainingLines = currentLines.slice(qty);
-
-    // 4) TRỪ KHO BẰNG CÁCH SET TRỰC TIẾP (KHÔNG DÙNG TRANSACTION)
-    try {
-      await db.ref(`products/${product_id}/data`).set(remainingLines.join('\n'));
-    } catch (err) {
-      console.error('Lỗi cập nhật kho:', err);
-      return res.status(500).json({ 
-        success: false, 
-        error: 'stock_update_failed', 
-        message: 'Không thể cập nhật kho hàng' 
-      });
-    }
-
-    // 5) Cập nhật số lượng đã bán (dùng transaction để tránh race condition)
-    await db.ref(`products/${product_id}/sold`).transaction(current => {
-      return (current || 0) + qty;
-    }).catch(() => {});
-
-    // 6) TRỪ SỐ DƯ ĐẠI LÝ (dùng transaction để đảm bảo atomic)
-    const balanceResult = await db.ref(`shops/${shop_id}`).transaction(current => {
-      if (!current) return current;
-      const bal = current.balance || 0;
-      if (bal < price) {
-        // Không đủ tiền, abort transaction
-        return;
+    // Nếu có shop_id, kiểm tra token hợp lệ
+    if (shop_id) {
+      const shopSnap = await db.ref(`shops/${shop_id}`).once('value');
+      const shop = shopSnap.val();
+      if (!shop) {
+        return res.status(404).json({ success: false, error: 'shop_not_found' });
       }
-      current.balance = bal - price;
-      current.totalOrders = (current.totalOrders || 0) + 1;
-      current.totalSpent = (current.totalSpent || 0) + price;
-      return current;
-    });
-
-    // Kiểm tra kết quả transaction
-    if (!balanceResult.committed) {
-      // TRANSACTION BỊ HỦY - HOÀN LẠI KHO
-      console.warn('Transaction số dư thất bại, hoàn lại kho...');
-      
-      // Hoàn lại kho bằng cách gộp soldLines đã lấy ra với remainingLines
-      const refundData = soldLines.concat(remainingLines);
-      await db.ref(`products/${product_id}/data`).set(refundData.join('\n'));
-      
-      // Hoàn lại số lượng đã bán
-      await db.ref(`products/${product_id}/sold`).transaction(current => {
-        return Math.max(0, (current || 0) - qty);
-      }).catch(() => {});
-
-      // Kiểm tra lý do thất bại: do thiếu tiền hay lỗi khác
-      if (balanceResult.error === 'MAX_RETRIES') {
-        return res.status(402).json({ 
-          success: false, 
-          error: 'insufficient_balance', 
-          message: 'Số dư đại lý không đủ' 
-        });
+      if (shop.token !== token) {
+        return res.status(401).json({ success: false, error: 'invalid_token' });
       }
-      
-      return res.status(500).json({ 
-        success: false, 
-        error: 'balance_transaction_failed', 
-        message: 'Giao dịch số dư thất bại, vui lòng thử lại' 
+      if (shop.status === 'banned') {
+        return res.status(403).json({ success: false, error: 'shop_banned' });
+      }
+
+      // Lọc đơn hàng theo shop_id (cần thêm chỉ mục trong Firebase)
+      // Cách đơn giản: lấy tất cả và lọc ở đây (không hiệu quả với lượng lớn)
+      const snapshot = await ordersRef.once('value');
+      const allOrders = snapshot.val() || {};
+      Object.keys(allOrders).forEach(key => {
+        if (allOrders[key].shop_id === shop_id) {
+          ordersData[key] = allOrders[key];
+        }
       });
+    } else {
+      const snapshot = await ordersRef.once('value');
+      ordersData = snapshot.val() || {};
     }
 
-    // 7) KIỂM TRA LẠI SỐ DƯ SAU TRANSACTION
-    const finalShop = balanceResult.snapshot.val();
-    if (!finalShop || (finalShop.balance === undefined && finalShop.balance !== 0)) {
-      // Nếu số dư không hợp lệ, hoàn lại kho
-      console.warn('Số dư không hợp lệ sau transaction, hoàn lại kho...');
-      const refundData = soldLines.concat(remainingLines);
-      await db.ref(`products/${product_id}/data`).set(refundData.join('\n'));
-      await db.ref(`products/${product_id}/sold`).transaction(current => {
-        return Math.max(0, (current || 0) - qty);
-      }).catch(() => {});
-      
-      return res.status(500).json({ 
-        success: false, 
-        error: 'invalid_balance_state', 
-        message: 'Trạng thái số dư không hợp lệ' 
-      });
+    // Chuyển đổi và sắp xếp
+    let orders = Object.keys(ordersData).map(key => ({
+      order_id: key,
+      ...ordersData[key]
+    }));
+
+    // Sắp xếp theo thời gian giảm dần
+    orders.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    // Giới hạn số lượng
+    if (limit) {
+      orders = orders.slice(0, parseInt(limit));
     }
 
-    // 8) Ghi lại đơn hàng thành công
-    const orderCode = randomOrderCode();
-    const orderRef = db.ref('shop_orders').push();
-    const orderData = {
-      shopId: shop_id,
-      shopName: shop.name || 'Đại lý API',
-      productId: product_id,
-      productName: product.name || '',
-      quantity: qty,
-      price,
-      inputData: input_data || '',
-      orderCode,
-      data: soldLines.join('\n'),
-      timestamp: Date.now(),
-      status: 'success'
-    };
-    await orderRef.set(orderData);
-
-    // 9) Trả về kết quả thành công
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      order_code: orderCode,
-      order_id: orderRef.key,
-      product_id,
-      product_name: product.name || '',
-      quantity: qty,
-      price,
-      balance_left: finalShop.balance || 0,
-      data: soldLines
+      total: orders.length,
+      orders
     });
 
-  } catch (err) {
-    console.error('order error:', err);
-    return res.status(500).json({ 
-      success: false, 
-      error: 'server_error', 
-      message: 'Lỗi máy chủ, vui lòng thử lại' 
-    });
+  } catch (error) {
+    console.error('Lỗi khi lấy đơn hàng:', error);
+    res.status(500).json({ success: false, error: 'server_error' });
   }
-};
+}
