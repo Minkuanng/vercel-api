@@ -2,9 +2,17 @@
 const admin = require('firebase-admin');
 const { getFirestore } = require('firebase-admin/firestore');
 
-// Khởi tạo Firebase Admin
+// Khởi tạo Firebase Admin - BẮT BUỘC PHẢI CÓ
 if (!admin.apps.length) {
   try {
+    // Kiểm tra biến môi trường
+    if (!process.env.FIREBASE_PROJECT_ID || 
+        !process.env.FIREBASE_CLIENT_EMAIL || 
+        !process.env.FIREBASE_PRIVATE_KEY || 
+        !process.env.FIREBASE_DATABASE_URL) {
+      console.error('Missing Firebase environment variables');
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
@@ -27,6 +35,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  // Xử lý preflight request
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -61,6 +70,7 @@ module.exports = async (req, res) => {
     } catch (error) {
       console.error('Error fetching products:', error);
       return res.status(500).json({
+        success: false,
         error: 'Internal Server Error',
         message: error.message
       });
@@ -83,24 +93,28 @@ module.exports = async (req, res) => {
       // Validate required fields
       if (!name || typeof name !== 'string' || name.trim() === '') {
         return res.status(400).json({ 
+          success: false,
           error: 'name is required and must be a non-empty string' 
         });
       }
 
       if (!price || typeof price !== 'number' || price < 0) {
         return res.status(400).json({ 
+          success: false,
           error: 'price is required and must be a positive number' 
         });
       }
 
       if (!category || typeof category !== 'string' || category.trim() === '') {
         return res.status(400).json({ 
+          success: false,
           error: 'category is required and must be a non-empty string' 
         });
       }
 
       if (!data || (typeof data !== 'string' || data.trim() === '')) {
         return res.status(400).json({ 
+          success: false,
           error: 'data is required and must be a non-empty string' 
         });
       }
@@ -134,6 +148,7 @@ module.exports = async (req, res) => {
     } catch (error) {
       console.error('Error creating product:', error);
       return res.status(500).json({
+        success: false,
         error: 'Internal Server Error',
         message: error.message
       });
@@ -142,6 +157,7 @@ module.exports = async (req, res) => {
 
   // Nếu method không được hỗ trợ
   return res.status(405).json({ 
+    success: false,
     error: 'Method Not Allowed', 
     allowed: ['GET', 'POST'] 
   });
