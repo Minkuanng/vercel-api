@@ -4,5 +4,15 @@
     "api/*.js": {
       "maxDuration": 10
     }
-  }
+  },
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ]
 }
