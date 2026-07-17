@@ -1,3 +1,7 @@
 {
-  "version": 2
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/product/:id", "destination": "/api/product?id=:id" },
+    { "source": "/api/products/batch", "destination": "/api/products-batch" }
+  ]
 }
